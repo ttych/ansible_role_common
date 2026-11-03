@@ -1,0 +1,49 @@
+---
+
+- name: Initialize flags
+  set_fact:
+    _is_musl: false
+    _is_avx2: false
+
+
+- name: Linux context
+  when: ansible_facts.system == 'Linux'
+  block:
+
+    - name: Check for Alpine Linux
+      set_fact:
+        _is_musl: true
+      when: ansible_facts.get('os_family') == 'Alpine'
+
+    - name: Check ldd for musl
+      set_fact:
+        _is_musl: true
+      when:
+        - ldd_version.stdout is defined
+        - ldd_version.stdout | lower | regex_search('musl')
+      vars:
+        ldd_version: "{{ lookup('pipe', 'ldd --version 2>&1', errors='ignore') }}"
+
+    - name: Check AVX2
+      set_fact:
+        _is_avx2: true
+      when: '"avx2" in ansible_facts.flags'
+
+
+- name: Darwin context
+  when: ansible_facts.system == 'Darwin'
+  block:
+
+    - name: Check AVX2
+      set_fact:
+        _is_avx2: true
+      when:
+        - lookup('pipe', 'sysctl -n hw.optional.avx2_0 2>/dev/null') != '1'
+
+
+- name: Windows context
+  when: ansible_facts.system == 'Windows'
+  block:
+
+    - debug:
+        msg: "not managed"
