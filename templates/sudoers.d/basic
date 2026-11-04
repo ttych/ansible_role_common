@@ -1,0 +1,3 @@
+{% for entry in _sudoers_item.entries %}
+{{ entry.user }} {{ entry.host|default('ALL') }}=({{ entry.run_as|default('ALL') }}) {{ entry.commands | join(', ') }}
+{% endfor %}

@@ -1,0 +1,21 @@
+---
+
+- name: define _sudoers_d
+  set_fact:
+    _sudoers_d: /etc/sudoers.d
+  when:
+    - _sudoers_d is not defined
+    - _sudoers_d in [none, '']
+
+- name: deploy sudoers
+  template:
+    src: "{{ _sudoers_item.template | d('sudoers.d/basic') }}"
+    dest: "{{ _sudoers_d }}/{{ _sudoers_item.name }}"
+    owner: root
+    group: "{{ root_group }}"
+    mode: 0440
+    validate: 'visudo -cf %s'
+  when: _sudoers_item.enable | d(true)
+  loop: "{{ _sudoers | default([]) }}"
+  loop_control:
+    loop_var: _sudoers_item
