@@ -1,55 +1,98 @@
 ---
 
 # - debug:
-#     msg: "{{ _user_zfs_properties }}"
-
-# - debug:
 #     msg: "{{ _user }}"
 
-- block:
 
-    - name: _user_zfs_properties default
+- name: _user_zfs_properties default
+  when: _user_zfs_properties is not defined
+  set_fact:
+    _user_zfs_properties:
+      setuid: off
+      compression: "lz4"
+      sharenfs: off
+      sharesmb: off
+      atime: off
+      relatime: off
+
+# - debug:
+#     msg: "{{ _user_zfs_properties }}"
+
+
+- name: "define _user_home_ for {{ _user.name }}"
+  set_fact:
+    _user_home_: "{{ _user.home | default('/home/' + _user.name) }}"
+
+- name: "define _user_alt_home_ for {{ _user.name }}"
+  when: >-
+    (_user_alt_home_base is defined and _user_alt_home_base not in [none, ''])
+    or (_user.alt_home is defined and _user.alt_home not in [none, ''])
+  set_fact:
+    _user_alt_home_: "{{ _user.alt_home | default([_user_alt_home_base, _user.name] | path_join) }}"
+
+
+- name: zfs home
+  when:
+    - _user_try_zfs | d(true)
+    - _user.create_home | d(true)
+    - _user_home_ is defined and _user_home_ not in [none, '', '/nonexistent']
+  block:
+
+    - name: "define _user_home_base_ for {{ _user.name }}"
       set_fact:
-        _user_zfs_properties:
-          setuid: off
-          compression: "lz4"
-          sharenfs: off
-          sharesmb: off
-          atime: off
-          relatime: off
-      when: _user_zfs_properties is not defined
+        _user_home_base_: "{{ _user_home_ | dirname }}"
 
-    - name: "define user_home for {{ _user.name }}"
+    - name: "define _user_home_name_ for {{ _user.name }}"
       set_fact:
-        _user_home: "{{ _user.home | default('/home/' + _user.name) }}"
+        _user_home_name_: "{{ _user_home_ | basename }}"
 
-    - name: "define _user_home_base for {{ _user.name }}"
-      set_fact:
-        _user_home_base: "{{ _user_home | dirname }}"
-
-    - name: "define _user_home_name for {{ _user.name }}"
-      set_fact:
-        _user_home_name: "{{ _user_home | basename }}"
-
-    - name: "get associated dataset from _user_home_base for {{ _user.name }}"
-      shell: zfs list -H "{{ _user_home_base }}" | awk '$5 == "{{ _user_home_base }}" {print $1}'
+    - name: "get associated dataset from _user_home_base_ for {{ _user.name }}"
+      shell: zfs list -H "{{ _user_home_base_ }}" | awk '$5 == "{{ _user_home_base_ }}" {print $1}'
       register: _user_home_base_dataset
       changed_when: no
 
     - block:
-        - name: "create dataset for _user_home for {{ _user.name }}"
+        - name: "create dataset for _user_home_ for {{ _user.name }}"
           zfs:
-            name: "{{ _user_home_base_dataset.stdout }}/{{ _user_home_name }}"
+            name: "{{ _user_home_base_dataset.stdout }}/{{ _user_home_name_ }}"
             state: present
             extra_zfs_properties: "{{ _user_zfs_properties | combine(_user.zfs_properties|d({})) }}"
-
       when:
         - _user_home_base_dataset.rc == 0
         - _user_home_base_dataset.stdout != ""
 
+
+- name: zfs alt home
   when:
-    - _user.home is not defined or _user.home != '/nonexistent'
-    - _user.create_home is not defined or _user.create_home
+    - _user_try_zfs | d(true)
+    - _user_alt_home_enabled | d(false)
+    - _user.create_alt_home | d(false)
+    - _user_alt_home_ is defined and _user_alt_home_ not in [none, '', '/nonexistent']
+  block:
+
+    - name: "define _user_alt_home_base_ for {{ _user.name }}"
+      set_fact:
+        _user_alt_home_base_: "{{ _user_alt_home_ | dirname }}"
+
+    - name: "define _user_alt_home_name_ for {{ _user.name }}"
+      set_fact:
+        _user_alt_home_name_: "{{ _user_alt_home_ | basename }}"
+
+    - name: "get associated dataset from _user_alt_home_base_ for {{ _user.name }}"
+      shell: zfs list -H "{{ _user_alt_home_base_ }}" | awk '$5 == "{{ _user_alt_home_base_ }}" {print $1}'
+      register: _user_alt_home_base_dataset
+      changed_when: no
+
+    - block:
+        - name: "create dataset for _user_alt_home_ for {{ _user.name }}"
+          zfs:
+            name: "{{ _user_alt_home_base_dataset.stdout }}/{{ _user_alt_home_name_ }}"
+            state: present
+            extra_zfs_properties: "{{ _user_zfs_properties | combine(_user.zfs_properties|d({})) }}"
+      when:
+        - _user_alt_home_base_dataset.rc == 0
+        - _user_alt_home_base_dataset.stdout != ""
+
 
 
 - name: "create {{ _user.name }} user"
@@ -70,18 +113,42 @@
     expires: "{{ _user.expires | default('-1') }}"
 
 
-- name: "fix {{ _user.name }} homedir permissions"
+
+- name: "home dir permissions for {{ _user.name }}"
   file:
-    path: "{{ _user_home }}"
+    path: "{{ _user_home_ }}"
     owner: "{{ _user.name }}"
     group: "{{ _user.group }}"
-    mode: "{{ _user.home_mode | default('0700') }}"
+    mode: "{{ _user.home_mode | default(_user_home_mode) | default('0700') }}"
     #recurse: yes
     #follow: no
   when:
     - _user.create_home|d(true)
-    - _user.home_mode is defined
-    - _user_home is defined
+    - _user.home_mode is defined or _user_home_mode is defined
+    - _user_home_ is defined and _user_home_ not in [none, '', '/nonexistent']
+
+
+- name: "alt home dir permissions for {{ _user.name }}"
+  when:
+    - _user_alt_home_enabled | d(false)
+    - _user.create_alt_home|d(false)
+    - _user_alt_home_ is defined and _user_alt_home_ not in [none, '', '/nonexistent']
+  block:
+
+    - name: "alt home dir for {{ _user.name }}"
+      file:
+        path: "{{ _user_alt_home_ }}"
+        state: directory
+
+    - name: "alt home dir permissions for {{ _user.name }}"
+      file:
+        path: "{{ _user_alt_home_ }}"
+        owner: "{{ _user.name }}"
+        group: "{{ _user.group }}"
+        mode: "{{ _user.alt_home_mode | default(_user.home_mode) | default(_user_alt_home_mode) | default('0700') }}"
+      when:
+        - _user.alt_home_mode is defined or _user.home_mode is defined or _user_alt_home_mode is defined
+
 
 
 - name: "add authorized_key for {{ _user.name }}"
@@ -95,6 +162,7 @@
     - key is defined
     - key is not none
     - key != ""
+
 
 - name: Deploy shell environments
   ansible.builtin.template:
