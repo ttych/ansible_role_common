@@ -1,0 +1,49 @@
+---
+
+- name: set _dotfiles_user_default_repository
+  when: _dotfiles_user_default_repository is not defined or _dotfiles_user_default_repository in [none, '']
+  ansible.builtin.set_fact:
+    _dotfiles_user_default_repository: 'https://github.com/ttych/dotfiles.git'
+
+
+- name: deploy dotfiles
+  when:
+    - _dotfiles_user.dotfiles is defined
+    - _dotfiles_user.dotfiles is not none
+    - _dotfiles_user.dotfiles | length > 0
+  block:
+    - name: whoami
+      shell: whoami
+      changed_when: false
+      register: t_dotfiles_user_whoami
+
+    - fail:
+        msg: "unable to switch to {{ _dotfiles_user.name }}"
+      when: _dotfiles_user.name != t_dotfiles_user_whoami.stdout
+
+    - name: "get homedir for {{ _dotfiles_user.name }}"
+      shell: >
+        getent passwd {{ _dotfiles_user.name }} | cut -d: -f6
+      changed_when: false
+      register: t_dotfiles_user_homedir
+
+    - block:
+        - name: "clone dotfiles repository for {{ _dotfiles_user.name }}"
+          git:
+            repo: "{{ _dotfiles_user.dotfiles_repository | default(_dotfiles_user_default_repository) }}"
+            dest: "{{ t_dotfiles_user_homedir.stdout }}/.dotfiles"
+            version: master
+            accept_hostkey: yes
+            umask: "077"
+            force: yes
+          register: t_dotfiles_user_clone
+
+        # - name: "postinstall dotfiles for {{ user }}"
+        #   shell: "{{ t_users_homedir.stdout }}/.dotfiles/install.sh"
+        #   when: t_users_dotfiles_checkout is changed
+
+      when:
+        - _dotfiles_user.dotfiles == 't_dotfiles'
+
+  become: yes
+  become_user: "{{ _dotfiles_user.name }}"
